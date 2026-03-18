@@ -28,13 +28,13 @@ def fit_dbm(d, model_func, side, k, n, model_name):
     mutation = fit_args["mutation"]
     recombination = fit_args["recombination"]
 
-    sub = d["subject"]
-    day = d["day"]
+    sub = d["subject_id"].iloc[0]
+    session_num = d["session_num"].iloc[0]
 
     drec = []
     for m, mod in enumerate(model_func):
-        dd = d[(d["subject"] == sub)
-               & (d["day"] == day)][["cat", "x", "y", "resp"]]
+        dd = d[(d["subject_id"] == sub)
+               & (d["session_num"] == session_num)][["cat", "x", "y", "resp"]]
 
         cat = dd.cat.to_numpy()
         x = dd.x.to_numpy()
@@ -97,7 +97,7 @@ def fit_dbm(d, model_func, side, k, n, model_name):
         a2 = np.sqrt(1 - a1**2)
         b = results['x'][1]
 
-        print(d[["subject", "day"]].iloc[0])
+        print(d[["subject_id", "session_num"]].iloc[0])
         print(model_name[m], results["x"], results["fun"])
         print(a1, a2, b)
         print(np.unique(resp))
@@ -280,10 +280,10 @@ def nll_gcc_eq(params, *args):
     if side == 0:
         zscoresX = (x - xc) / noise
         zscoresY = (y - yc) / noise
-    if side == 1:
+    elif side == 1:
         zscoresX = (xc - x) / noise
         zscoresY = (y - yc) / noise
-    if side == 2:
+    elif side == 2:
         zscoresX = (x - xc) / noise
         zscoresY = (yc - y) / noise
     else:
@@ -337,10 +337,10 @@ def val_gcc_eq(params, *args):
     if side == 0:
         zscoresX = (x - xc) / noise
         zscoresY = (y - yc) / noise
-    if side == 1:
+    elif side == 1:
         zscoresX = (xc - x) / noise
         zscoresY = (y - yc) / noise
-    if side == 2:
+    elif side == 2:
         zscoresX = (x - xc) / noise
         zscoresY = (yc - y) / noise
     else:

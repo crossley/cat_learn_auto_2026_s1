@@ -7,18 +7,11 @@ from datetime import datetime, timedelta
 import re
 import os
 import sys
-import uuid
-import re
-import json
 import numpy as np
 import pandas as pd
 from psychopy import visual, core, event, logging  # type: ignore
 from psychopy.hardware import keyboard  # type: ignore
 from util_func import *
-
-SCHEMA_VERSION = "1.0.0"
-SOURCE_MODE = "lab"
-
 
 # --------------------------- EEG (Parallel Port) helper ---------------------------
 # Flip-locked rising edges; non-blocking clear to zero a few ms later.
@@ -133,105 +126,210 @@ if __name__ == "__main__":
     n_test = 100
     n_total = n_train + n_test
 
+    # --------------------------- Display / geometry -------------------------------
+    pixels_per_inch = 227 / 2
+    px_per_cm = pixels_per_inch / 2.54
+    size_cm = 5
+    size_px = int(size_cm * px_per_cm)
+
+    win = visual.Window(size=(1920, 1080),
+                        fullscr=True,
+                        units='pix',
+                        color=(0.494, 0.494, 0.494),
+                        colorSpace='rgb',
+                        winType='pyglet',
+                        useRetina=True,
+                        waitBlanking=True)
+    win.mouseVisible = False
+    frame_rate = win.getActualFrameRate()
+    print(f"[Info] Frame rate: {frame_rate}")
+    center_x, center_y = 0, 0
+
     # --------------------------- Subject handling --------------------------------
     dir_data = "../data"
     os.makedirs(dir_data, exist_ok=True)
 
-    info_path = os.path.join(dir_data, "participant_info.json")
+    PID_DIGITS = 3
+    SUBJECT_IDS = [
+        "002", "077", "134", "189", "213", "268", "303", "358", "482",
+        "527", "594", "639", "662", "707", "729", "875", "943", "998"
+    ]
+    CONDITION_BY_SUBJECT = {
+        "002": 90,
+        "077": 90,
+        "134": 90,
+        "189": 90,
+        "213": 90,
+        "268": 90,
+        "303": 90,
+        "358": 90,
+        "482": 90,
+        "527": 180,
+        "594": 180,
+        "639": 180,
+        "662": 180,
+        "707": 180,
+        "729": 180,
+        "875": 180,
+        "943": 180,
+        "998": 180,
+    }
 
-    if os.path.exists(info_path):
-        try:
-            with open(info_path, "r") as f:
-                info = json.load(f)
-            subject = info["subject"]
-            condition = int(info["condition"])
-        except Exception:
-            print("Could not read participant_info.json. Aborting.")
-            sys.exit()
-    else:
-        subject = uuid.uuid4().hex[:12]
-        condition = int(np.random.choice([90, 180]))
-        info = {"subject": subject, "condition": condition}
-        try:
-            with open(info_path, "x") as f:
-                json.dump(info, f, indent=4)
-        except FileExistsError:
-            print("participant_info.json already exists. Aborting.")
-            sys.exit()
+    pid_input = ""
+    pid_error = ""
+    pid_prompt = visual.TextStim(win,
+                                 text="",
+                                 color='white',
+                                 height=28,
+                                 wrapWidth=1500)
+
+    while True:
+        pid_prompt.text = (
+            f"Enter {PID_DIGITS}-digit Participant ID\n\n"
+            f"ID: {pid_input or '___'}\n\n"
+            "Press ENTER to continue, BACKSPACE to edit, ESC to quit.\n"
+            f"{pid_error}"
+        )
+        pid_prompt.draw()
+        win.flip()
+
+        keys = event.getKeys()
+        for k in keys:
+            if k == "escape":
+                win.close()
+                core.quit()
+                sys.exit()
+            if k == "backspace":
+                pid_input = pid_input[:-1]
+                pid_error = ""
+                continue
+            if k in {"return", "num_enter"}:
+                if len(pid_input) != PID_DIGITS:
+                    pid_error = f"\nInvalid ID format. Enter exactly {PID_DIGITS} digits."
+                    continue
+                if pid_input not in CONDITION_BY_SUBJECT:
+                    pid_error = "\nThis Participant ID is not enrolled for this study."
+                    continue
+                subject = pid_input
+                condition = CONDITION_BY_SUBJECT[subject]
+                break
+
+            digit = None
+            if re.fullmatch(r"[0-9]", k):
+                digit = k
+            else:
+                m = re.fullmatch(r"num_([0-9])", k)
+                if m:
+                    digit = m.group(1)
+            if digit is not None and len(pid_input) < PID_DIGITS:
+                pid_input += digit
+                pid_error = ""
+        else:
+            continue
+        break
 
     # ---------------------------  session handling -------------------------------
     WINDOW = timedelta(hours=12)
     now = datetime.now()
 
-    fn_re = re.compile(
-        rf"^sub_{re.escape(str(subject))}_date_(\d{{4}}_\d{{2}}_\d{{2}})_data\.csv$"
+    fn_re_part = re.compile(
+        rf"^sub_{re.escape(str(subject))}_sess_(\d{{3}})_part_(\d{{3}})_date_(\d{{4}}_\d{{2}}_\d{{2}})_data\.csv$"
     )
+
+    def make_data_filename(subj, sess_num, part_num, date_key):
+        return (
+            f"sub_{subj}_sess_{int(sess_num):03d}_part_{int(part_num):03d}"
+            f"_date_{date_key}_data.csv"
+        )
 
     def load_n_done(path):
         return pd.read_csv(path).shape[0]
 
     # ------------------------------------------------------------------
-    # Gather all files for this subject
+    # Gather all files for this subject and group them by session
     # ------------------------------------------------------------------
-    candidates = []
+    session_records = {}
+
     for fn in os.listdir(dir_data):
-        if fn_re.match(fn):
-            full = os.path.join(dir_data, fn)
-            try:
-                mtime = datetime.fromtimestamp(os.path.getmtime(full))
-                candidates.append((mtime, fn, full))
-            except OSError:
-                pass
-
-    candidates.sort(reverse=True, key=lambda x: x[0])
-    candidates_asc = sorted(candidates, key=lambda x: x[0])
-    file_to_session_num = {fn: i + 1 for i, (_, fn, _) in enumerate(candidates_asc)}
-
-    resume = None
-    most_recent = None
-    session_num = len(candidates) + 1
-    today_key = now.strftime("%Y_%m_%d")
-
-    # ------------------------------------------------------------------
-    # Identify most recent file and most recent incomplete file
-    # ------------------------------------------------------------------
-    for i, (mtime, fn, full) in enumerate(candidates):
-        try:
-            n = load_n_done(full)
-        except Exception:
+        full = os.path.join(dir_data, fn)
+        if not os.path.isfile(full):
             continue
 
-        if i == 0:
-            most_recent = (mtime, fn, full, n)
+        m_part = fn_re_part.match(fn)
+        if m_part:
+            session_num_i = int(m_part.group(1))
+            part_num_i = int(m_part.group(2))
+            date_key_i = m_part.group(3)
+            try:
+                mtime = datetime.fromtimestamp(os.path.getmtime(full))
+                n_rows = load_n_done(full)
+            except Exception:
+                continue
+            session_records.setdefault(session_num_i, []).append({
+                "part_num": part_num_i,
+                "date_key": date_key_i,
+                "mtime": mtime,
+                "fn": fn,
+                "full": full,
+                "n_rows": n_rows
+            })
+            continue
 
-        if n < n_total and resume is None:
-            resume = (mtime, fn, full, n)
+    sessions = []
+    for s_num, parts in session_records.items():
+        parts_sorted = sorted(parts, key=lambda p: (p["part_num"], p["mtime"]))
+        n_done_session = int(sum(p["n_rows"] for p in parts_sorted))
+        latest_part = max(parts_sorted, key=lambda p: p["mtime"])
+        sessions.append({
+            "session_num": int(s_num),
+            "parts": parts_sorted,
+            "n_done": n_done_session,
+            "last_mtime": latest_part["mtime"],
+            "max_part": int(max(p["part_num"] for p in parts_sorted)),
+        })
+    sessions.sort(key=lambda s: s["last_mtime"], reverse=True)
+
+    resume = None
+    most_recent = sessions[0] if sessions else None
+    session_num = max((s["session_num"] for s in sessions), default=0) + 1
+    part_num = 1
+    today_key = now.strftime("%Y_%m_%d")
+    f_name = make_data_filename(subject, session_num, part_num, today_key)
+    full_path = os.path.join(dir_data, f_name)
+    n_done = 0
+
+    for sess in sessions:
+        if sess["n_done"] < n_total:
+            resume = sess
+            break
 
     # ------------------------------------------------------------------
     # Decision logic
     # ------------------------------------------------------------------
     if resume is not None:
-        mtime, f_name, full_path, n_done = resume
-        age = now - mtime
-        m = fn_re.match(f_name)
-        if m:
-            today_key = m.group(1)
+        age = now - resume["last_mtime"]
 
         if age <= WINDOW:
-            session_num = file_to_session_num.get(f_name, len(candidates) + 1)
+            session_num = resume["session_num"]
+            part_num = resume["max_part"] + 1
+            n_done = resume["n_done"]
+            today_key = now.strftime("%Y_%m_%d")
+            f_name = make_data_filename(subject, session_num, part_num, today_key)
+            full_path = os.path.join(dir_data, f_name)
             remaining = n_total - n_done
             print(
                 f"Resuming your last incomplete session "
-                f"(last saved {mtime:%Y-%m-%d %H:%M})."
+                f"(last saved {resume['last_mtime']:%Y-%m-%d %H:%M})."
             )
             print(
                 f"You have {remaining} trials remaining in this session. "
                 "Please try to finish today’s trials so you can stay on track."
             )
         else:
-            session_num = len(candidates) + 1
+            session_num = max((s["session_num"] for s in sessions), default=0) + 1
+            part_num = 1
             today_key = now.strftime("%Y_%m_%d")
-            f_name = f"sub_{subject}_date_{today_key}_data.csv"
+            f_name = make_data_filename(subject, session_num, part_num, today_key)
             full_path = os.path.join(dir_data, f_name)
             n_done = 0
             print(
@@ -241,20 +339,20 @@ if __name__ == "__main__":
 
     else:
         if most_recent is not None:
-            mtime, fn, path, last_n = most_recent
-            age = now - mtime
+            age = now - most_recent["last_mtime"]
 
-            if last_n >= n_total and age < WINDOW:
-                next_ok = mtime + WINDOW
+            if most_recent["n_done"] >= n_total and age < WINDOW:
+                next_ok = most_recent["last_mtime"] + WINDOW
                 print(
                     "It has been fewer than 12 hours since your last completed session.\n"
                     f"Please wait until {next_ok:%Y-%m-%d %H:%M} before trying again."
                 )
                 sys.exit()
 
-        session_num = len(candidates) + 1
+        session_num = max((s["session_num"] for s in sessions), default=0) + 1
+        part_num = 1
         today_key = now.strftime("%Y_%m_%d")
-        f_name = f"sub_{subject}_date_{today_key}_data.csv"
+        f_name = make_data_filename(subject, session_num, part_num, today_key)
         full_path = os.path.join(dir_data, f_name)
         n_done = 0
 
@@ -267,7 +365,8 @@ if __name__ == "__main__":
 
     print(
         f"Subject: {subject} | Condition: {condition} | "
-        f"Session: {session_num} | Date: {today_key} | Resuming at trial: {n_done}"
+        f"Session: {session_num} | Part: {part_num} | Date: {today_key} | "
+        f"Resuming at trial: {n_done}"
     )
 
     trial = n_done - 1
@@ -301,27 +400,6 @@ if __name__ == "__main__":
     # ds['yt_deg'] = ds['yt'] * 180.0 / np.pi
     # sns.scatterplot(data=ds, x='xt', y='yt_deg', hue='cat', ax=ax[0, 2])
     # plt.show()
-
-    # --------------------------- Display / geometry -------------------------------
-    pixels_per_inch = 227 / 2
-    px_per_cm = pixels_per_inch / 2.54
-    size_cm = 5
-    size_px = int(size_cm * px_per_cm)
-
-    win = visual.Window(size=(1920, 1080),
-                        fullscr=True,
-                        units='pix',
-                        color=(0.494, 0.494, 0.494),
-                        colorSpace='rgb',
-                        winType='pyglet',
-                        useRetina=True,
-                        waitBlanking=True)
-
-    win.mouseVisible = False
-    frame_rate = win.getActualFrameRate()
-    print(f"[Info] Frame rate: {frame_rate}")
-
-    center_x, center_y = 0, 0
 
     # --------------------------- Stim objects ------------------------------------
     fix_h = visual.Line(win,
@@ -379,9 +457,8 @@ if __name__ == "__main__":
     state_current = "state_init"
     state_entry = True
 
-    resp = -1
     resp_key = ""
-    action_label = ""
+    resp = ""
     fb = ""
     rt = -1
     trial = n_done - 1
@@ -395,39 +472,27 @@ if __name__ == "__main__":
 
     # Record keeping
     trial_data = {
-        "schema_version": [],
-        "source_mode": [],
         "subject_id": [],
         "session_num": [],
-        "trial_index": [],
+        "session_part": [],
+        "trial": [],
         "phase": [],
-        "category": [],
-        "stim_sf": [],
-        "stim_ori_deg": [],
+        "cat": [],
         "resp_key": [],
-        "action_label": [],
-        "correct": [],
-        "rt_ms": [],
+        "resp": [],
+        "fb": [],
+        "rt": [],
         "ts_iso": [],
-        "data_file": [],
         "eeg_enabled": [],
         "trigger_stim": [],
         "trigger_resp": [],
-        "trigger_feedback": [],
+        "trigger_fb": [],
         "port_address": [],
         "probe_condition": [],
-        # Backward-compatible legacy columns:
-        "subject": [],
-        "day": [],
-        "trial": [],
-        "cat": [],
         "x": [],
         "y": [],
         "xt": [],
-        "yt": [],
-        "resp": [],
-        "rt": [],
-        "fb": []
+        "yt": []
     }
 
     # --------------------------- Main loop ---------------------------------------
@@ -482,9 +547,8 @@ if __name__ == "__main__":
             fix_v.draw()
 
             if time_state > 1000:
-                resp = -1
                 resp_key = ""
-                action_label = ""
+                resp = ""
                 fb = ""
                 rt = -1
                 state_clock.reset()
@@ -496,7 +560,11 @@ if __name__ == "__main__":
                     sf_cycles_per_cm = ds['xt'].iloc[trial]
                     sf_cycles_per_pix = sf_cycles_per_cm / px_per_cm
                     ori_deg = ds['yt'].iloc[trial] * 180.0 / np.pi
-                    cat = ds['cat'].iloc[trial]
+                    cat = str(ds['cat'].iloc[trial]).upper()
+                    if cat not in {"A", "B"}:
+                        raise ValueError(
+                            f"Category labels must be 'A' or 'B'. Got: {cat}"
+                        )
                     phase = ds['phase'].iloc[trial]
                     trig_stim = np.nan
                     trig_resp = np.nan
@@ -576,9 +644,7 @@ if __name__ == "__main__":
                     fb = "Correct"
                 else:
                     fb = "Incorrect"
-
                 resp = resp_label
-                action_label = resp_label
 
                 state_clock.reset()
                 state_current = "state_feedback"
@@ -622,49 +688,35 @@ if __name__ == "__main__":
             fb_ring.draw()
 
             if time_state > 1000:
-                correct = int(fb == "Correct")
                 ts_iso = datetime.now().isoformat()
                 probe_condition = condition if phase == "test" else np.nan
 
-                trial_data["schema_version"].append(SCHEMA_VERSION)
-                trial_data["source_mode"].append(SOURCE_MODE)
                 trial_data["subject_id"].append(subject)
                 trial_data["session_num"].append(session_num)
-                trial_data["trial_index"].append(trial)
+                trial_data["session_part"].append(part_num)
+                trial_data["trial"].append(trial)
                 trial_data["phase"].append(phase)
-                trial_data["category"].append(cat)
-                trial_data["stim_sf"].append(sf_cycles_per_pix)
-                trial_data["stim_ori_deg"].append(ori_deg)
+                trial_data["cat"].append(cat)
                 trial_data["resp_key"].append(resp_key)
-                trial_data["action_label"].append(action_label)
-                trial_data["correct"].append(correct)
-                trial_data["rt_ms"].append(rt)
+                trial_data["resp"].append(resp)
+                trial_data["fb"].append(fb)
+                trial_data["rt"].append(rt)
                 trial_data["ts_iso"].append(ts_iso)
-                trial_data["data_file"].append(f_name)
                 trial_data["eeg_enabled"].append(int(bool(EEG_ENABLED)))
                 trial_data["trigger_stim"].append(trig_stim)
                 trial_data["trigger_resp"].append(trig_resp)
-                trial_data["trigger_feedback"].append(trig_fb)
+                trial_data["trigger_fb"].append(trig_fb)
                 trial_data["port_address"].append(EEG_PORT_ADDRESS if EEG_ENABLED else "")
                 trial_data["probe_condition"].append(probe_condition)
-
-                trial_data["subject"].append(subject)
-                trial_data["day"].append(today_key)
-                trial_data["trial"].append(trial)
-                trial_data["cat"].append(ds["cat"].iloc[trial])
                 trial_data["x"].append(ds["x"].iloc[trial])
                 trial_data["y"].append(ds["y"].iloc[trial])
                 trial_data["xt"].append(ds["xt"].iloc[trial])
                 trial_data["yt"].append(ds["yt"].iloc[trial])
-                trial_data["resp"].append(resp)
-                trial_data["rt"].append(rt)
-                trial_data["fb"].append(fb)
 
                 pd.DataFrame(trial_data).to_csv(full_path, index=False)
 
                 state_current = "state_iti"
                 state_entry = True
-                resp = -1
                 rt = -1
 
                 jitter = np.random.randint(200, 401)

@@ -51,9 +51,9 @@ def make_stim_cats(n_stimuli_per_category=2000):
     stimuli_A = sample_within_ellipse(category_A_mean, n_stimuli_per_category)
     stimuli_B = sample_within_ellipse(category_B_mean, n_stimuli_per_category)
 
-    # Define the labels
-    labels_A = np.array([1] * n_stimuli_per_category)
-    labels_B = np.array([2] * n_stimuli_per_category)
+    # Define labels to match runtime response labels.
+    labels_A = np.array(["A"] * n_stimuli_per_category)
+    labels_B = np.array(["B"] * n_stimuli_per_category)
 
     # Concatenate the stimuli and labels
     stimuli = np.concatenate([stimuli_A, stimuli_B])
@@ -134,6 +134,8 @@ def create_grating_patch(size, freq, theta):
 
 
 def grating_to_surface(grating_patch):
+    import pygame
+
     normalized_patch = (grating_patch + 1) / 2 * 255
     uint8_patch = normalized_patch.astype(np.uint8)
     surface = pygame.Surface((grating_patch.shape[0], grating_patch.shape[1]),
@@ -142,11 +144,12 @@ def grating_to_surface(grating_patch):
     return surface
 
 
-def plot_stim_space_examples(ds):
+def plot_stim_space_examples(ds=None):
 
     import pygame
 
-    ds = make_stim_cats(n_stimuli_per_category=200)
+    if ds is None:
+        ds, _, _ = make_stim_cats(n_stimuli_per_category=200)
 
     screen_width, screen_height = 800, 600
     center_x = screen_width // 2
@@ -189,10 +192,12 @@ def plot_stim_space_examples(ds):
     running = True
     while running:
         for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
-                    pygame.quit()
                 if event.key == pygame.K_SPACE:
                     running = False
 
+    pygame.quit()
