@@ -464,6 +464,7 @@ if __name__ == "__main__":
     trial = n_done - 1
     phase = ""
     cat = ""
+    gap_ms = 0
     sf_cycles_per_pix = np.nan
     ori_deg = np.nan
     trig_stim = np.nan
@@ -575,11 +576,26 @@ if __name__ == "__main__":
                     grating.pos = (center_x, center_y)
 
                     kb.clearEvents()
-                    state_current = "state_stim"
+                    gap_ms = np.random.randint(200, 401)
+                    state_current = "state_pre_stim_gap"
                     state_entry = True
 
-                    jitter = np.random.randint(200, 401)
-                    core.wait(jitter / 1000.0)
+            win.flip()
+
+        # --------------------- STATE: PRE-STIM GAP ---------------------
+        elif state_current == "state_pre_stim_gap":
+            if state_entry:
+                state_clock.reset()
+                state_entry = False
+
+            time_state = state_clock.getTime() * 1000.0
+
+            fix_h.draw()
+            fix_v.draw()
+
+            if time_state >= gap_ms:
+                state_current = "state_stim"
+                state_entry = True
 
             win.flip()
 
@@ -647,11 +663,25 @@ if __name__ == "__main__":
                 resp = resp_label
 
                 state_clock.reset()
-                state_current = "state_feedback"
+                gap_ms = np.random.randint(200, 401)
+                state_current = "state_pre_feedback_gap"
                 state_entry = True
 
-                jitter = np.random.randint(200, 401)
-                core.wait(jitter / 1000.0)
+            win.flip()
+
+        # --------------------- STATE: PRE-FEEDBACK GAP ---------------------
+        elif state_current == "state_pre_feedback_gap":
+            if state_entry:
+                state_clock.reset()
+                state_entry = False
+
+            time_state = state_clock.getTime() * 1000.0
+
+            grating.draw()
+
+            if time_state >= gap_ms:
+                state_current = "state_feedback"
+                state_entry = True
 
             win.flip()
 
@@ -718,9 +748,6 @@ if __name__ == "__main__":
                 state_current = "state_iti"
                 state_entry = True
                 rt = -1
-
-                jitter = np.random.randint(200, 401)
-                core.wait(jitter / 1000.0)
 
             win.flip()
 
