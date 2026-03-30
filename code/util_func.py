@@ -144,26 +144,13 @@ def grating_to_surface(grating_patch):
     return surface
 
 
-def plot_stim_space_examples(ds=None, win=None):
-    from psychopy import visual, event, core  # type: ignore
+def plot_stim_space_examples(ds, win, pixels_per_inch, px_per_cm):
+    from psychopy import visual, event, core 
 
-    if ds is None:
-        ds, _, _ = make_stim_cats(n_stimuli_per_category=200)
+    screen_size_pix = tuple(int(x) for x in win.size)
 
-    owns_window = win is None
-    if owns_window:
-        win = visual.Window(size=(1400, 900),
-                            fullscr=False,
-                            units='pix',
-                            color=(0.494, 0.494, 0.494),
-                            colorSpace='rgb',
-                            useRetina=False,
-                            waitBlanking=True)
-
-    pixels_per_inch = 227 / 2
-    px_per_cm = pixels_per_inch / 2.54
     size_cm = 3
-    size_px = int(size_cm * px_per_cm)
+    size_px = int(round(size_cm * px_per_cm))
 
     # Show representative real stimuli from each category in their abstract sf/orientation space.
     exemplars = []
@@ -182,6 +169,9 @@ def plot_stim_space_examples(ds=None, win=None):
             return (out_lo + out_hi) / 2
         return out_lo + ((val - lo) / (hi - lo)) * (out_hi - out_lo)
 
+    x_extent = screen_size_pix[0] * 0.14
+    y_extent = screen_size_pix[1] * 0.23
+
     old_color = win.color
     win.color = (0.494, 0.494, 0.494)
 
@@ -192,8 +182,8 @@ def plot_stim_space_examples(ds=None, win=None):
               "Press SPACE to continue or ESC to quit."),
         color='white',
         height=28,
-        pos=(0, 360),
-        wrapWidth=1500,
+        pos=(0, screen_size_pix[1] * 0.34),
+        wrapWidth=screen_size_pix[0] * 0.9,
     )
 
     event.clearEvents()
@@ -203,8 +193,8 @@ def plot_stim_space_examples(ds=None, win=None):
 
     for ex in exemplars:
         pos = (
-            map_range(ex["xt"], xt_min, xt_max, -240, 240),
-            map_range(ex["yt"], yt_min, yt_max, -240, 240),
+            map_range(ex["xt"], xt_min, xt_max, -x_extent, x_extent),
+            map_range(ex["yt"], yt_min, yt_max, -y_extent, y_extent),
         )
 
         stim_objs.append(

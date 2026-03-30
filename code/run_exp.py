@@ -116,7 +116,6 @@ class EEGPort:
         except Exception:
             pass
 
-
 # ----------------------------------------------------------------------------------
 
 if __name__ == "__main__":
@@ -132,13 +131,16 @@ if __name__ == "__main__":
     size_cm = 5
     size_px = int(size_cm * px_per_cm)
 
-    win = visual.Window(size=(1680, 1050),
-                        fullscr=True,
-                        units='pix',
-                        color=(0.494, 0.494, 0.494),
-                        colorSpace='rgb',
-                        useRetina=False,
-                        waitBlanking=True)
+    win = visual.Window(
+        size=(1920, 1080),
+        fullscr=True,
+        units='pix',
+        color=(0.494, 0.494, 0.494),
+        colorSpace='rgb',
+        winType='pyglet',
+        useRetina=True,
+        waitBlanking=True,
+    )
     win.mouseVisible = False
     frame_rate = win.getActualFrameRate()
     print(f"[Info] Frame rate: {frame_rate}")
@@ -228,21 +230,38 @@ if __name__ == "__main__":
         break
 
     # ---------------------------  session handling -------------------------------
-    WINDOW = timedelta(hours=12)
+    RESUME_WINDOW = timedelta(hours=12)
+    NEW_SESSION_COOLDOWN = timedelta(hours=8)
     now = datetime.now()
+    today = now.date()
 
     fn_re_part = re.compile(
         rf"^sub_{re.escape(str(subject))}_sess_(\d{{3}})_part_(\d{{3}})_date_(\d{{4}}_\d{{2}}_\d{{2}})_data\.csv$"
     )
 
-    def make_data_filename(subj, sess_num, part_num, date_key):
-        return (
-            f"sub_{subj}_sess_{int(sess_num):03d}_part_{int(part_num):03d}"
-            f"_date_{date_key}_data.csv"
-        )
+    def load_file_summary(path, fallback_date_key):
+        df = pd.read_csv(path)
+        n_rows = int(df.shape[0])
 
-    def load_n_done(path):
-        return pd.read_csv(path).shape[0]
+        start_ts = None
+        end_ts = None
+        if n_rows > 0 and "ts_iso" in df.columns:
+            ts = pd.to_datetime(df["ts_iso"], errors="coerce").dropna()
+            if not ts.empty:
+                start_ts = ts.iloc[0].to_pydatetime()
+                end_ts = ts.iloc[-1].to_pydatetime()
+
+        if start_ts is None:
+            start_day = datetime.strptime(fallback_date_key, "%Y_%m_%d").date()
+            start_ts = datetime.combine(start_day, datetime.min.time())
+        if end_ts is None:
+            end_ts = start_ts
+
+        return {
+            "n_rows": n_rows,
+            "start_ts": start_ts,
+            "end_ts": end_ts,
+        }
 
     # ------------------------------------------------------------------
     # Gather all files for this subject and group them by session
@@ -260,90 +279,107 @@ if __name__ == "__main__":
             part_num_i = int(m_part.group(2))
             date_key_i = m_part.group(3)
             try:
-                mtime = datetime.fromtimestamp(os.path.getmtime(full))
-                n_rows = load_n_done(full)
+                file_summary = load_file_summary(full, date_key_i)
             except Exception:
                 continue
             session_records.setdefault(session_num_i, []).append({
                 "part_num": part_num_i,
                 "date_key": date_key_i,
-                "mtime": mtime,
+                "start_ts": file_summary["start_ts"],
+                "end_ts": file_summary["end_ts"],
                 "fn": fn,
                 "full": full,
-                "n_rows": n_rows
+                "n_rows": file_summary["n_rows"]
             })
             continue
 
     sessions = []
     for s_num, parts in session_records.items():
-        parts_sorted = sorted(parts, key=lambda p: (p["part_num"], p["mtime"]))
+        parts_sorted = sorted(parts, key=lambda p: (p["part_num"], p["start_ts"]))
+        first_part = min(parts_sorted, key=lambda p: (p["part_num"], p["start_ts"]))
         n_done_session = int(sum(p["n_rows"] for p in parts_sorted))
-        latest_part = max(parts_sorted, key=lambda p: p["mtime"])
+        latest_part = max(parts_sorted, key=lambda p: p["end_ts"])
         sessions.append({
             "session_num": int(s_num),
             "parts": parts_sorted,
             "n_done": n_done_session,
-            "last_mtime": latest_part["mtime"],
+            "last_ts": latest_part["end_ts"],
             "max_part": int(max(p["part_num"] for p in parts_sorted)),
+            "session_day": first_part["start_ts"].date(),
+            "is_complete": bool(n_done_session >= n_total),
         })
-    sessions.sort(key=lambda s: s["last_mtime"], reverse=True)
+    sessions.sort(key=lambda s: s["last_ts"], reverse=True)
 
-    resume = None
-    most_recent = sessions[0] if sessions else None
+    incomplete_sessions = [s for s in sessions if not s["is_complete"]]
+    if len(incomplete_sessions) > 1:
+        conflict_desc = ", ".join(
+            f"sess_{s['session_num']:03d} (day {s['session_day']}, last save {s['last_ts']:%Y-%m-%d %H:%M})"
+            for s in incomplete_sessions)
+        print(
+            "Multiple incomplete sessions were found for this participant.\n"
+            f"Resolve them manually before continuing: {conflict_desc}"
+        )
+        sys.exit()
+
+    recent_incomplete = None
+    completed_sessions = [s for s in sessions if s["is_complete"]]
+    last_completed = max(
+        completed_sessions, key=lambda s: s["last_ts"], default=None)
     session_num = max((s["session_num"] for s in sessions), default=0) + 1
     part_num = 1
     today_key = now.strftime("%Y_%m_%d")
-    f_name = make_data_filename(subject, session_num, part_num, today_key)
+    f_name = (
+        f"sub_{subject}_sess_{int(session_num):03d}_part_{int(part_num):03d}"
+        f"_date_{today_key}_data.csv"
+    )
     full_path = os.path.join(dir_data, f_name)
     n_done = 0
 
-    for sess in sessions:
-        if sess["n_done"] < n_total:
-            resume = sess
+    for sess in incomplete_sessions:
+        if (now - sess["last_ts"]) <= RESUME_WINDOW:
+            recent_incomplete = sess
             break
 
     # ------------------------------------------------------------------
     # Decision logic
     # ------------------------------------------------------------------
-    if resume is not None:
-        age = now - resume["last_mtime"]
-
-        if age <= WINDOW:
-            session_num = resume["session_num"]
-            part_num = resume["max_part"] + 1
-            n_done = resume["n_done"]
-            today_key = now.strftime("%Y_%m_%d")
-            f_name = make_data_filename(subject, session_num, part_num, today_key)
-            full_path = os.path.join(dir_data, f_name)
-            remaining = n_total - n_done
-            print(
-                f"Resuming your last incomplete session "
-                f"(last saved {resume['last_mtime']:%Y-%m-%d %H:%M})."
-            )
-            print(
-                f"You have {remaining} trials remaining in this session. "
-                "Please try to finish today’s trials so you can stay on track."
-            )
-        else:
-            session_num = max((s["session_num"] for s in sessions), default=0) + 1
-            part_num = 1
-            today_key = now.strftime("%Y_%m_%d")
-            f_name = make_data_filename(subject, session_num, part_num, today_key)
-            full_path = os.path.join(dir_data, f_name)
-            n_done = 0
-            print(
-                "Your last incomplete session was more than 12 hours ago. "
-                "Starting a new session."
-            )
-
+    if recent_incomplete is not None:
+        session_num = recent_incomplete["session_num"]
+        part_num = recent_incomplete["max_part"] + 1
+        n_done = recent_incomplete["n_done"]
+        today_key = now.strftime("%Y_%m_%d")
+        f_name = (
+            f"sub_{subject}_sess_{int(session_num):03d}_part_{int(part_num):03d}"
+            f"_date_{today_key}_data.csv"
+        )
+        full_path = os.path.join(dir_data, f_name)
+        remaining = n_total - n_done
+        print(
+            f"Resuming your last incomplete session "
+            f"(last saved {recent_incomplete['last_ts']:%Y-%m-%d %H:%M})."
+        )
+        print(
+            f"You have {remaining} trials remaining in this session. "
+            "Please try to finish today’s trials so you can stay on track."
+        )
     else:
-        if most_recent is not None:
-            age = now - most_recent["last_mtime"]
+        completed_today = next(
+            (s for s in completed_sessions if s["session_day"] == today), None)
+        if completed_today is not None:
+            next_ok = datetime.combine(
+                today + timedelta(days=1), datetime.min.time())
+            print(
+                "You already completed a session assigned to today.\n"
+                f"Please wait until {next_ok:%Y-%m-%d %H:%M} before starting another."
+            )
+            sys.exit()
 
-            if most_recent["n_done"] >= n_total and age < WINDOW:
-                next_ok = most_recent["last_mtime"] + WINDOW
+        if last_completed is not None:
+            age = now - last_completed["last_ts"]
+            if age < NEW_SESSION_COOLDOWN:
+                next_ok = last_completed["last_ts"] + NEW_SESSION_COOLDOWN
                 print(
-                    "It has been fewer than 12 hours since your last completed session.\n"
+                    "It has been fewer than 8 hours since your last completed session.\n"
                     f"Please wait until {next_ok:%Y-%m-%d %H:%M} before trying again."
                 )
                 sys.exit()
@@ -351,7 +387,10 @@ if __name__ == "__main__":
         session_num = max((s["session_num"] for s in sessions), default=0) + 1
         part_num = 1
         today_key = now.strftime("%Y_%m_%d")
-        f_name = make_data_filename(subject, session_num, part_num, today_key)
+        f_name = (
+            f"sub_{subject}_sess_{int(session_num):03d}_part_{int(part_num):03d}"
+            f"_date_{today_key}_data.csv"
+        )
         full_path = os.path.join(dir_data, f_name)
         n_done = 0
 
@@ -391,7 +430,7 @@ if __name__ == "__main__":
     ds = pd.concat([ds_train, ds_test]).reset_index(drop=True)
 
     # NOTE: Uncomment to visualise gratings in stim space
-    # plot_stim_space_examples(ds, win=win)
+    # plot_stim_space_examples(ds, win, pixels_per_inch, px_per_cm)
 
     # NOTE: Uncomment to visualize stimulus space scatter
     # import matplotlib.pyplot as plt
@@ -429,10 +468,11 @@ if __name__ == "__main__":
     grating = visual.GratingStim(win,
                                  tex='sin',
                                  mask='circle',
+                                 texRes=256,
                                  interpolate=True,
                                  size=(size_px, size_px),
                                  units='pix',
-                                 sf=0.02,
+                                 sf=0.0,
                                  ori=0.0)
 
     fb_ring = visual.Circle(win,
@@ -721,7 +761,7 @@ if __name__ == "__main__":
 
             if time_state > 1000:
                 ts_iso = datetime.now().isoformat()
-                probe_condition = condition if phase == "test" else np.nan
+                probe_condition = condition
 
                 trial_data["subject_id"].append(subject)
                 trial_data["session_num"].append(session_num)
