@@ -233,15 +233,15 @@ if __name__ == "__main__":
     # plt.show()
 
     # # NOTE: Uncomment to visualise gratings in stim space
-    x = np.array([25, 50, 75])
-    x_A = x - 10
-    x_B = x + 10
-    y_A = x + 10
-    y_B = x - 10
-    x = np.concat([x_A, x_B])
-    y = np.concat([y_A, y_B])
-    dss = pd.DataFrame({'x':x, 'y':y})
-    plot_stim_space_examples(dss, win, grating, PX_PER_CM)
+    # x = np.array([25, 50, 75])
+    # x_A = x - 10
+    # x_B = x + 10
+    # y_A = x + 10
+    # y_B = x - 10
+    # x = np.concat([x_A, x_B])
+    # y = np.concat([y_A, y_B])
+    # dss = pd.DataFrame({'x':x, 'y':y})
+    # plot_stim_space_examples(dss, win, grating, PX_PER_CM)
 
     trial = n_done - 1
 
