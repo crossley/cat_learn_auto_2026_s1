@@ -1,2 +1,4 @@
 .DS_Store
 data/eeg/
+__pycache__/
+*.pyc
