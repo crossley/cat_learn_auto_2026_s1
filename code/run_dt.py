@@ -103,7 +103,7 @@ if __name__ == "__main__":
         n_train = 550
         n_test = 100
     else:
-        n_train = 100
+        n_train = 300
         n_test = 0
 
     n_total = n_train + n_test
