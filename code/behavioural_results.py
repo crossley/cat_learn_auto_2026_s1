@@ -17,7 +17,7 @@ for fd in os.listdir(dir_data):
     if os.path.isdir(dir_data_fd):
         for fs in os.listdir(dir_data_fd):
             f_full_path = os.path.join(dir_data_fd, fs)
-            if os.path.isfile(f_full_path) and "task_cp_" not in fs:
+            if os.path.isfile(f_full_path) and 'task_cp_' not in fs:
                 
                 df = pd.read_csv(f_full_path)
                 df['f_name'] = fs
@@ -28,7 +28,7 @@ for fd in os.listdir(dir_data_lab):
     if os.path.isdir(dir_data_lab_fd):
         for fs in os.listdir(dir_data_lab_fd):
             f_full_path = os.path.join(dir_data_lab_fd, fs)
-            if os.path.isfile(f_full_path) and fs.endswith(".csv"):
+            if os.path.isfile(f_full_path) and fs.endswith('.csv'):
 
                 # in session 1, participant 875 did 10 train trials and 60
                 # probe trials taking first 10 train trials and adding it to
@@ -46,142 +46,217 @@ for fd in os.listdir(dir_data_lab):
                     df['f_name'] = fs
                     df_lab_rec.append(df)
 
-d_home = pd.concat(df_train_rec, ignore_index=True)
 d_lab = pd.concat(df_lab_rec, ignore_index=True)
+d_home = pd.concat(df_train_rec, ignore_index=True)
 
 block_size = 25
 
 # NOTE: Setting dfs up 
+# lab data 
+# 550 trials -- train, 100 trials -- test
+dd_lab = d_lab.sort_values(['subject_id', 'session_num', 'session_part',
+                             'trial']).reset_index(drop=True)
+
+dd_lab['acc'] = (dd_lab['cat'] == dd_lab['resp']).astype(int)
+dd_lab['trial'] = dd_lab.groupby(['subject_id', 'session_num']).cumcount()
+dd_lab['n_trials'] = dd_lab.groupby(['subject_id', 'session_num'])['trial'].transform('count')
+dd_lab['block'] = dd_lab.groupby(['subject_id', 'session_num'])['trial'].transform(lambda x: x // block_size)
+
+# ds for all, train, and test trials 
+dd_lab_all = (dd_lab.groupby(['subject_id', 'session_num', 'block',
+                              'probe_condition', 'phase'],
+                             as_index=False)['acc'].mean().sort_values(['session_num',
+                                                                        'subject_id',
+                                                                        'block']))
+
+dd_lab_train = dd_lab[dd_lab['phase'] == 'train'].groupby(['subject_id',
+                                                           'session_num',
+                                                           'probe_condition',
+                                                           'block'])['acc'].mean().reset_index()
+
+dd_lab_test = dd_lab[dd_lab['phase'] == 'test'].groupby(['subject_id',
+                                                         'session_num',
+                                                         'probe_condition',
+                                                         'block'])['acc'].mean().reset_index()
 # at-home data
 # 300 trials -- train
-d_home = d_home.sort_values(["subject_id", "session_num", "session_part",
-                               "trial"]).reset_index(drop=True)
-d_home = d_home[d_home['session_num'] != 17]
+dd_home = d_home.sort_values(['subject_id', 'session_num', 'session_part',
+                               'trial']).reset_index(drop=True)
+dd_home = dd_home[dd_home['session_num'] != 17]
 
-d_home['acc'] = (d_home['cat'] == d_home['resp']).astype(int)
-d_home['trial'] = d_home.groupby(['subject_id', 'session_num']).cumcount()
-d_home['n_trials'] = d_home.groupby(['subject_id', 'session_num'])['trial'].transform('count')
-d_home['block'] = d_home.groupby(['subject_id', 'session_num'])['trial'].transform(lambda x: x // block_size)
-d_home = d_home.drop(columns=['value_left', 'size_left', 'value_right',
+dd_home['acc'] = (dd_home['cat'] == dd_home['resp']).astype(int)
+dd_home['trial'] = dd_home.groupby(['subject_id', 'session_num']).cumcount()
+dd_home['n_trials'] = dd_home.groupby(['subject_id', 'session_num'])['trial'].transform('count')
+dd_home['block'] = dd_home.groupby(['subject_id', 'session_num'])['trial'].transform(lambda x: x // block_size)
+dd_home = dd_home.drop(columns=['value_left', 'size_left', 'value_right',
                                 'size_right', 'congruency', 'cue',
                                 'resp_key_ns', 'resp_ns', 'fb_ns', 'rt_ns',
                                 't_cue_ns', 't_fb_ns'])
 
 # dual task day (17)
 # 300 trials -- train + numerical stroop
-d_dt = d_home.sort_values(["subject_id", "session_num", "session_part",
-                             "trial"]).reset_index(drop=True)
-d_dt = d_dt[d_dt['session_num'] == 17]
+d_dt = d_home.sort_values(['subject_id', 'session_num', 'session_part',
+                             'trial']).reset_index(drop=True)
+d_dt = d_dt[d_dt['session_num'] < 15]
 
-# TODO: next line raises error
-d_dt['acc'] = (d_dt['cat'] == d_home['resp']).astype(int)
+d_dt['acc'] = (d_dt['cat'] == d_dt['resp']).astype(int)
 d_dt['trial'] = d_dt.groupby(['subject_id', 'session_num']).cumcount()
 d_dt['n_trials'] = d_dt.groupby(['subject_id', 'session_num'])['trial'].transform('count')
 d_dt['block'] = d_dt.groupby(['subject_id', 'session_num'])['trial'].transform(lambda x: x // block_size)
 
-# lab data 
-# 550 trials -- train, 100 trials -- test
-d_lab = d_lab.sort_values(["subject_id", "session_num", "session_part",
-                             "trial"]).reset_index(drop=True)
-
-d_lab['acc'] = (d_lab['cat'] == d_lab['resp']).astype(int)
-d_lab['trial'] = d_lab.groupby(['subject_id', 'session_num']).cumcount()
-d_lab['n_trials'] = d_lab.groupby(['subject_id', 'session_num'])['trial'].transform('count')
-d_lab['block'] = d_lab.groupby(['subject_id', 'session_num'])['trial'].transform(lambda x: x // block_size)
-
-# ds for all, train, and test trials 
-d_lab_all = (d_lab.groupby(["subject_id", "session_num", "block",
-                              "probe_condition", "phase"],
-                             as_index=False)["acc"].mean().sort_values(["session_num",
-                                                                        "subject_id",
-                                                                        "block"]))
-
-d_lab_train = d_lab[d_lab['phase'] == 'train'].groupby(['subject_id',
-                                                           'session_num',
-                                                           'probe_condition',
-                                                           'block']).agg({'acc':
-                                                                          'mean'}).reset_index()
-
-d_lab_test = d_lab[d_lab['phase'] == 'test'].groupby(['subject_id',
-                                                         'session_num',
-                                                         'probe_condition',
-                                                         'block']).agg({'acc':
-                                                                        'mean'}).reset_index()
-
 # NOTE: Inspect performance
-# average accuracy per lab day
-d_lab_pd_avg = d_lab_train.groupby(['subject_id', 'session_num']).agg({'acc': 'mean'}).reset_index()
+# -- LAB -- 
+# average accuracy per lab day (train trials)
+dd_lab_pd_avg = dd_lab_train.groupby(['subject_id', 'session_num'])['acc'].mean().reset_index()
 
 # looking for average day accuracies below 75% after the first lab session 
-below_exp = d_lab_pd_avg[(d_lab_pd_avg['acc'] < 0.75) & (d_lab_pd_avg['session_num'] != 1)]
+below_exp = dd_lab_pd_avg[(dd_lab_pd_avg['acc'] < 0.75) & (dd_lab_pd_avg['session_num'] != 1)]
+
+# -- HOME -- 
+dd_home_pd_avg = dd_home.groupby(['subject_id', 'session_num'])['acc'].mean().reset_index()
+
+dd_home[(dd_home['session_num'] == 1) & (dd_home['block'] > 12)]
 
 # participants 2, 189, and 639 have below 70% accuracy by the end of lab day 2
-# (after 6 sessions) -- inspecting at home performance 
-home_inspect = d_home[(d_home['subject_id'] == 2) |
-                       (d_home['subject_id'] == 189) |
-                       (d_home['subject_id'] == 639)]
+# (after 6 sessions) -- at-home data shows that they are not breaking 80% at
+# home by days 7, 6, and 4 respectively
+home_inspect = dd_home[(dd_home['subject_id'] == 2) |
+                       (dd_home['subject_id'] == 189) |
+                       (dd_home['subject_id'] == 639)]
 
-# at-home data shows that they are not breaking 80% at home by days 7, 6, and 4
-# respectively
-home_pd_avg = home_inspect.groupby(['subject_id', 'session_num']).agg({'acc': 'mean'}).reset_index()
+dd_inspect_avg = home_inspect.groupby(['subject_id', 'session_num'])['acc'].mean().reset_index()
+
+# -- DUAL TASK -- 
+d_dt_acc = d_dt.groupby(['subject_id', 'session_num'])['acc'].mean().reset_index()
 
 # NOTE: Plots 
-# -- HOME -- 
-days_home = d_home["session_num"].unique()[:16]
+# -- LAB --
+days_lab = sorted(d_lab['session_num'].unique()[:5])
 
 # accuracy across task across days
-fig, axes = plt.subplots(2, len(days_home), squeeze = False)
+fig, ax = plt.subplots(1, len(days_lab), squeeze = False, figsize=(24, 3.5), sharey=True)
+for a, day in zip(ax.flat, days_lab):
+      sns.lineplot(
+          data=dd_lab[dd_lab['session_num'] == day],
+          x='block',
+          y='acc',
+          hue='subject_id',
+          legend=False,
+          errorbar=None,
+          ax=a
+      )
+      a.set_title(f'Day {day}')
+      a.set_ylim(0, 1)
+plt.tight_layout()
+plt.show()
 
-# average accuracy in task across days
+# average accuracy in task (in train trials) across days
+dd_avg_total_lab = dd_lab_pd_avg.groupby(['session_num'])['acc'].mean().reset_index()
 
+fig, ax = plt.subplots(1, 1, squeeze = False)
+sns.pointplot(data=dd_avg_total_lab,
+              x='session_num',
+              y='acc',
+              )
+plt.tight_layout()
+plt.show()
+
+# average accuracy across participants across days
+dd_lab_pd_avg['subject_id'] = dd_lab_pd_avg['subject_id'].astype('category')
+
+fig, ax = plt.subplots(1, 1, squeeze = False)
+sns.pointplot(data=dd_lab_pd_avg,
+              x='session_num',
+              y='acc',
+              hue='subject_id',
+              )
+plt.tight_layout()
+plt.show()
+
+# -- HOME -- 
+days_home = dd_home['session_num'].unique()[:16]
+
+# accuracy across whole task across days
+fig, ax = plt.subplots(1, len(days_home), squeeze = False, figsize=(24, 3.5), sharey=True)
+for a, day in zip(ax.flat, days_home):
+      sns.lineplot(
+          data=dd_home[dd_home['session_num'] == day],
+          x='block',
+          y='acc',
+          hue='subject_id',
+          legend=False,
+          errorbar=None,
+          ax=a
+      )
+      a.set_title(f'Day {day}')
+      a.set_ylim(0, 1)
+plt.tight_layout()
+plt.show()
+
+# total average accuracy per day 
+dd_avg_total_home = dd_home_pd_avg.groupby(['session_num'])['acc'].mean().reset_index()
+
+fig, ax = plt.subplots(1, 1, squeeze = False)
+sns.pointplot(data=dd_avg_total_home,
+              x='session_num',
+              y='acc',
+              )
+plt.tight_layout()
+plt.show()
+
+# average accuracy in task per day across days across all participants
+dd_home_pd_avg['subject_id'] = dd_home_pd_avg['subject_id'].astype('category')
+
+fig, ax = plt.subplots(1, 1, squeeze = False)
+sns.pointplot(data=dd_home_pd_avg,
+              x='session_num',
+              y='acc',
+              hue='subject_id',
+              )
+plt.tight_layout()
+plt.show()
 
 # -- DUAL TASK --
 # average accuracy in task
-
+fig, ax = plt.subplots(1, 1, squeeze = False)
+sns.pointplot(data=d_dt_acc,
+              x='session_num',
+              y='acc',
+              hue='subject_id',
+              )
+plt.tight_layout()
+plt.show()
 
 # average accuracy compared to last at home day and last lab day
 
 
-# -- LAB --
-days_lab = d_lab["session_num"].unique()[:5]
-
-# accuracy across task across days
-
-
-
-# average accuracy in task across days
-
-
-# average accuracy across participants across days
-
-
-# 90 vs 180 cost
+# -- 90 vs 180 COST -- 
 # take participants 134, 213, 268, 358, and 482 session 1 out of d as they
 # completed 650 trials of train, no test trials were completed
-d_cost = d_lab_all.copy() 
+d_cost = dd_lab_all.copy() 
 
 drop_subs = [134, 213, 268, 358, 482]
 d_cost = d_cost[~((d_cost['session_num'] == 1) & (d_cost['subject_id'].isin(drop_subs)))]
 
-pre_block = d_cost.loc[d_cost["phase"] == "train", "block"].max()
-post_block = d_cost.loc[d_cost["phase"] == "test", "block"].min()
+pre_block = d_cost.loc[d_cost['phase'] == 'train', 'block'].max()
+post_block = d_cost.loc[d_cost['phase'] == 'test', 'block'].min()
 
-pre_90 = d_cost[(d_cost["block"] == pre_block) &
-                 (d_cost["probe_condition"] == 90)].groupby("session_num")["acc"].mean()
-post_90 = d_cost[(d_cost["block"] == post_block) &
-                  (d_cost["probe_condition"] == 90)].groupby("session_num")["acc"].mean()
+pre_90 = d_cost[(d_cost['block'] == pre_block) &
+                 (d_cost['probe_condition'] == 90)].groupby('session_num')['acc'].mean()
+post_90 = d_cost[(d_cost['block'] == post_block) &
+                  (d_cost['probe_condition'] == 90)].groupby('session_num')['acc'].mean()
 
-pre_180 = d_cost[(d_cost["block"] == pre_block) &
-                  (d_cost["probe_condition"] == 180)].groupby("session_num")["acc"].mean()
-post_180 = d_cost[(d_cost["block"] == post_block) &
-                   (d_cost["probe_condition"] == 180)].groupby("session_num")["acc"].mean()
+pre_180 = d_cost[(d_cost['block'] == pre_block) &
+                  (d_cost['probe_condition'] == 180)].groupby('session_num')['acc'].mean()
+post_180 = d_cost[(d_cost['block'] == post_block) &
+                   (d_cost['probe_condition'] == 180)].groupby('session_num')['acc'].mean()
 
 cost_90 = pre_90 - post_90
 cost_180 = pre_180 - post_180
 
 cost = pd.concat(
-    [cost_90.rename("cost").reset_index().assign(probe_condition="90"),
-     cost_180.rename("cost").reset_index().assign(probe_condition="180")],
+    [cost_90.rename('cost').reset_index().assign(probe_condition='90'),
+     cost_180.rename('cost').reset_index().assign(probe_condition='180')],
      ignore_index=True)
 
 # plot
@@ -191,7 +266,9 @@ plt.tight_layout()
 plt.show()
 
 ### HOW MATT WOULD DO IT (JUST THE PANDAS VERSION OF THE DATA.TABLE APPROACH IN 2020)
-d_cost = d_lab_all.copy() 
+d_cost = dd_lab_all.copy() 
+
+drop_subs = [134, 213, 268, 358, 482]
 d_cost = d_cost[~((d_cost['session_num'] == 1) & (d_cost['subject_id'].isin(drop_subs)))]
 
 d = d_cost[d_cost['block'] > 17] # equating number of train and test blocks for fair compare
@@ -200,10 +277,10 @@ dd = d.groupby(['subject_id', 'session_num', 'phase',
 
 dd_wide = (
   dd.pivot_table(
-      index=["subject_id", "session_num", "probe_condition"],
-      columns="phase",
-      values="acc",
-      aggfunc="mean"
+      index=['subject_id', 'session_num', 'probe_condition'],
+      columns='phase',
+      values='acc',
+      aggfunc='mean'
   )
   .reset_index()
 )
@@ -238,7 +315,7 @@ sns.lineplot(data=dd_wide[dd_wide['probe_condition'] == 180],
              hue = 'subject_id',
              ax=ax[0, 1]
 )
-sns.move_legend(ax[0, 0], "upper left", bbox_to_anchor=(1, 1))
-sns.move_legend(ax[0, 1], "upper left", bbox_to_anchor=(1, 1))
+sns.move_legend(ax[0, 0], 'upper left', bbox_to_anchor=(1, 1))
+sns.move_legend(ax[0, 1], 'upper left', bbox_to_anchor=(1, 1))
 plt.tight_layout()
 plt.show()
