@@ -78,6 +78,7 @@ dd_lab_test = dd_lab[dd_lab['phase'] == 'test'].groupby(['subject_id',
                                                          'session_num',
                                                          'probe_condition',
                                                          'block'])['acc'].mean().reset_index()
+
 # at-home data
 # 300 trials -- train
 dd_home = d_home.sort_values(['subject_id', 'session_num', 'session_part',
@@ -148,6 +149,22 @@ for a, day in zip(ax.flat, days_lab):
 plt.tight_layout()
 plt.show()
 
+# rts across task across days
+fig, ax = plt.subplots(1, len(days_lab), squeeze = False, figsize=(24, 3.5), sharey=True)
+for a, day in zip(ax.flat, days_lab):
+      sns.lineplot(
+          data=dd_lab[dd_lab['session_num'] == day],
+          x='block',
+          y='rt',
+          hue='subject_id',
+          legend=False,
+          errorbar=None,
+          ax=a
+      )
+      a.set_title(f'Day {day}')
+plt.tight_layout()
+plt.show()
+
 # average accuracy in task (in train trials) across days
 dd_avg_total_lab = dd_lab_pd_avg.groupby(['session_num'])['acc'].mean().reset_index()
 
@@ -174,6 +191,7 @@ plt.show()
 # -- HOME -- 
 days_home = dd_home['session_num'].unique()[:16]
 
+# NOTE: remove non learners
 # accuracy across whole task across days
 fig, ax = plt.subplots(1, len(days_home), squeeze = False, figsize=(24, 3.5), sharey=True)
 for a, day in zip(ax.flat, days_home):
@@ -193,6 +211,19 @@ plt.show()
 
 # total average accuracy per day 
 dd_avg_total_home = dd_home_pd_avg.groupby(['session_num'])['acc'].mean().reset_index()
+
+# before dropping non-learners 
+fig, ax = plt.subplots(1, 1, squeeze = False)
+sns.pointplot(data=dd_avg_total_home,
+              x='session_num',
+              y='acc',
+              )
+plt.tight_layout()
+plt.show()
+
+# dropping non-learners
+drop_subs_exc = [2, 189, 639]
+dd_home_pd_avg = dd_home_pd_avg[~((dd_home_pd_avg['subject_id'].isin(drop_subs_exc)))]
 
 fig, ax = plt.subplots(1, 1, squeeze = False)
 sns.pointplot(data=dd_avg_total_home,
@@ -302,6 +333,7 @@ sns.pointplot(data=dd_wide,
               x = 'session_num',
               y = 'diff_score',
               hue = 'probe_condition',
+              errorbar='se',
               linestyle='none',
               dodge=True
 )
@@ -323,5 +355,5 @@ sns.lineplot(data=dd_wide[dd_wide['probe_condition'] == 180],
 sns.move_legend(ax[0, 0], 'upper left', bbox_to_anchor=(1, 1))
 sns.move_legend(ax[0, 1], 'upper left', bbox_to_anchor=(1, 1))
 plt.tight_layout()
-barplotplt.show()
+plt.show()
 plt.savefig('90vs180.png')
